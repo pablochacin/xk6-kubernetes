@@ -25,6 +25,9 @@ import (
 
 	"go.k6.io/k6/js/modules"
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth" // Required for access to GKE and AKS
 	"k8s.io/client-go/tools/clientcmd"
@@ -49,6 +52,7 @@ type ModuleInstance struct {
 // Kubernetes is the exported object used within JavaScript.
 type Kubernetes struct {
 	client                 kubernetes.Interface
+	dynClient              dynamic.Interface
 	metaOptions            metaV1.ListOptions
 	ctx                    context.Context
 	ConfigMaps             *configmaps.ConfigMaps
@@ -116,6 +120,12 @@ func (mi *ModuleInstance) newClient(c goja.ConstructorCall) *goja.Object {
 			common.Throw(rt, err)
 		}
 		obj.client = clientset
+
+		dynClient, err := dynamic.NewForConfig(config)
+		if err != nil {
+			common.Throw(rt, err)
+		}
+		obj.dynClient = dynClient
 	} else {
 		// Pre-configured clientset is being injected for unit testing
 		obj.client = mi.clientset
@@ -149,4 +159,22 @@ func getClientConfig(options KubeConfig) (*rest.Config, error) {
 		kubeconfig = filepath.Join(home, ".kube", "config")
 	}
 	return clientcmd.BuildConfigFromFlags("", kubeconfig)
+}
+
+func (k8s *Kubernetes) Create(group schema.GroupVersionResource, namespace string, resource map[string]interface{}) (map[string]interface{}, error) {
+
+	uObj := &unstructured.Unstructured{
+		Object: resource,
+	}
+	g := schema.GroupVersionResource{
+		Group:    uObj.GroupVersionKind().Group,
+		Version:  uObj.GroupVersionKind().Version,
+		Resource: uObj.GroupVersionKind().Kind,
+	}
+
+	result, err := k8s.dynClient.Resource(g).Namespace(namespace).Create(k8s.ctx, uObj, metaV1.CreateOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return result.UnstructuredContent(), nil
 }
