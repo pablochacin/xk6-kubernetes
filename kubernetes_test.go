@@ -15,6 +15,10 @@ import (
 	"go.k6.io/k6/lib/testutils"
 	"go.k6.io/k6/metrics"
 
+	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynFake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -455,4 +459,55 @@ if (k8s.services.list().length != initialCount) {
 }
 `)
 	require.NoError(t, err)
+}
+
+// newTestKubernetes creates an instance of Kubernetes for testing
+func newTestKubernetes() *Kubernetes {
+	k8s := &Kubernetes{}
+	k8s.metaOptions = metaV1.ListOptions{}
+	k8s.ctx = context.TODO()
+	k8s.client = fake.NewSimpleClientset()
+	k8s.dynClient = dynFake.NewSimpleDynamicClient(
+		runtime.NewScheme(),
+	)
+
+	return k8s
+}
+
+// TestCreate tests the creation of a resource
+// Note: Due to a known issue with the fake dynamic client fields of type
+// []map[string]{} (e.g. containers) and []string (e.g. container's command)
+// must be defined as []interface{}
+// https://github.com/kubernetes/client-go/issues/913
+func TestCreate(t *testing.T) {
+	t.Parallel()
+
+	k8s := newTestKubernetes()
+
+	podGroup := schema.GroupVersionResource{
+		Group:    "",
+		Version:  "v1",
+		Resource: "pods",
+	}
+
+	podSpec := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]interface{}{
+			"name": "dynamic-pod",
+		},
+		"spec": map[string]interface{}{
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name":    "sleeper",
+					"image":   "busybox",
+					"command": []interface{}{"sh", "-c", "sleep 3"},
+				},
+			},
+		},
+	}
+	namespace := "default"
+	pod, err := k8s.Create(podGroup, namespace, podSpec)
+	require.NoError(t, err)
+	require.NotNil(t, pod)
 }
