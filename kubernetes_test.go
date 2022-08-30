@@ -20,6 +20,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynFake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"sigs.k8s.io/controller-runtime/pkg/envtest"
+    "k8s.io/client-go/kubernetes"
+    "k8s.io/client-go/dynamic"
 )
 
 type testEnv struct {
@@ -462,7 +466,7 @@ if (k8s.services.list().length != initialCount) {
 }
 
 // newTestKubernetes creates an instance of Kubernetes for testing
-func newTestKubernetes() *Kubernetes {
+func newFakeTestKubernetes() *Kubernetes {
 	k8s := &Kubernetes{}
 	k8s.metaOptions = metaV1.ListOptions{}
 	k8s.ctx = context.TODO()
@@ -474,6 +478,25 @@ func newTestKubernetes() *Kubernetes {
 	return k8s
 }
 
+
+// newTestKubernetes creates an instance of Kubernetes for testing
+func newTestKubernetes(t *testing.T) *Kubernetes {
+      testenv := &envtest.Environment{}
+
+      cfg, err := testenv.Start()
+      require.NoError(t, err)
+      k8s := &Kubernetes{}
+      k8s.metaOptions = metaV1.ListOptions{}
+      k8s.ctx = context.TODO()
+      k8s.client, err = kubernetes.NewForConfig(cfg)
+      require.NoError(t, err)
+      k8s.dynClient, err = dynamic.NewForConfig(cfg)
+      require.NoError(t, err)
+
+      return k8s
+}
+
+
 // TestCreate tests the creation of a resource
 // Note: Due to a known issue with the fake dynamic client fields of type
 // []map[string]{} (e.g. containers) and []string (e.g. container's command)
@@ -482,7 +505,7 @@ func newTestKubernetes() *Kubernetes {
 func TestCreate(t *testing.T) {
 	t.Parallel()
 
-	k8s := newTestKubernetes()
+	k8s := newTestKubernetes(t)
 
 	podGroup := schema.GroupVersionResource{
 		Group:    "",
